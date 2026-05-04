@@ -1,0 +1,181 @@
+.container {
+  min-height: 100vh;
+  background: radial-gradient(ellipse at bottom, #1b2735 0%, #090a0f 100%);
+  color: white;
+  font-family: 'Inter', system-ui, sans-serif;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* Background effects */
+.glowOrb1 {
+  position: absolute;
+  top: -10%;
+  left: -10%;
+  width: 50vw;
+  height: 50vw;
+  background: radial-gradient(circle, rgba(0, 230, 118, 0.1) 0%, transparent 70%);
+  z-index: 0;
+  pointer-events: none;
+}
+
+.glowOrb2 {
+  position: absolute;
+  bottom: -20%;
+  right: -10%;
+  width: 60vw;
+  height: 60vw;
+  background: radial-gradient(circle, rgba(255, 0, 85, 0.1) 0%, transparent 70%);
+  z-index: 0;
+  pointer-events: none;
+}
+
+.main {
+  position: relative;
+  z-index: 1;
+  max-width: 1200px;
+  width: 100%;
+  padding: 4rem 2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Hero Section */
+.heroSection {
+  text-align: center;
+  margin-bottom: 6rem;
+}
+
+.title {
+  font-size: 6rem;
+  font-weight: 900;
+  margin: 0;
+  letter-spacing: -2px;
+  text-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  animation: fadeInDown 1s ease-out;
+}
+
+.titleAccent {
+  color: #ff0055;
+  text-shadow: 0 0 20px rgba(255, 0, 85, 0.5);
+}
+
+.subtitle {
+  font-size: 1.5rem;
+  color: #a0aec0;
+  margin-top: 1rem;
+  margin-bottom: 3rem;
+  line-height: 1.5;
+  animation: fadeInUp 1s ease-out 0.3s backwards;
+}
+
+.characters {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 3rem;
+  margin-bottom: 4rem;
+  animation: scaleIn 1s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0.6s backwards;
+}
+
+.heroChar {
+  height: 200px;
+  filter: drop-shadow(0 20px 10px rgba(0,0,0,0.5));
+  transition: transform 0.3s ease;
+}
+
+.heroChar:hover {
+  transform: scale(1.1);
+}
+
+.vs {
+  font-size: 3rem;
+  font-weight: 900;
+  color: #ffea00;
+  text-shadow: 0 0 20px rgba(255, 234, 0, 0.6);
+  font-style: italic;
+}
+
+.playButton {
+  display: inline-block;
+  background: linear-gradient(45deg, #ff0055, #ff7700);
+  color: white;
+  padding: 1.5rem 4rem;
+  font-size: 1.5rem;
+  font-weight: 800;
+  text-decoration: none;
+  border-radius: 50px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  box-shadow: 0 15px 30px rgba(255, 0, 85, 0.4);
+  transition: all 0.3s ease;
+  animation: fadeInUp 1s ease-out 0.9s backwards;
+}
+
+.playButton:hover {
+  transform: translateY(-5px) scale(1.05);
+  box-shadow: 0 20px 40px rgba(255, 0, 85, 0.6);
+}
+
+/* Features */
+.features {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2rem;
+  width: 100%;
+  animation: fadeInUp 1s ease-out 1.2s backwards;
+}
+
+.featureCard {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 2rem;
+  border-radius: 20px;
+  backdrop-filter: blur(10px);
+  transition: transform 0.3s ease, background 0.3s ease;
+}
+
+.featureCard:hover {
+  transform: translateY(-10px);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.featureCard h3 {
+  font-size: 1.5rem;
+  margin-top: 0;
+  margin-bottom: 1rem;
+  color: #00e676;
+}
+
+.featureCard p {
+  color: #a0aec0;
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* Animations */
+@keyframes fadeInDown {
+  from { opacity: 0; transform: translateY(-30px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(30px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.8); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@media (max-width: 768px) {
+  .title { font-size: 4rem; }
+  .characters { gap: 1rem; }
+  .heroChar { height: 120px; }
+  .playButton { padding: 1rem 2rem; font-size: 1.2rem; }
+}
