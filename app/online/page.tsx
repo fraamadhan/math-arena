@@ -50,14 +50,15 @@ export default function OnlineDuelPage() {
   const [p1, setP1] = useState<PlayerState>({ hp: 100, combo: 0, input: '', anim: 'idle', feedback: null });
   const [p2, setP2] = useState<PlayerState>({ hp: 100, combo: 0, input: '', anim: 'idle', feedback: null });
   const [projectile, setProjectile] = useState<'none' | 'p1-to-p2' | 'p2-to-p1'>('none');
+  const [lastWinnerName, setLastWinnerName] = useState<string | null>(null);
 
   const roundTimerRef = useRef<NodeJS.Timeout | null>(null);
   
   // Ref to prevent stale closures in Supabase listeners
-  const stateRef = useRef({ status, localPlayerId });
+  const stateRef = useRef({ status, localPlayerId, p1Name, p2Name });
   useEffect(() => {
-    stateRef.current = { status, localPlayerId };
-  }, [status, localPlayerId]);
+    stateRef.current = { status, localPlayerId, p1Name, p2Name };
+  }, [status, localPlayerId, p1Name, p2Name]);
 
   useEffect(() => {
     // Check if name came from URL params (from Landing page)
@@ -88,20 +89,24 @@ export default function OnlineDuelPage() {
         const state = lobby.presenceState();
         const players = Object.values(state).flat() as any[];
         
-        // Find another player looking for match
-        const opponent = players.find(p => p.status === 'searching' && p.uuid !== myUuidRef.current);
-        
-        if (opponent) {
-          // We found an opponent! 
-          // To avoid race conditions, the person who joined the lobby FIRST becomes the Host (Player 1)
-          const isHost = myUuidRef.current < opponent.uuid; 
+        // Find ALL players currently searching
+        const searchingPlayers = players.filter(p => p.status === 'searching');
+        if (searchingPlayers.length < 2) return;
+
+        // Sort alphabetically by UUID to create deterministic global pairs
+        searchingPlayers.sort((a, b) => a.uuid.localeCompare(b.uuid));
+
+        const myIndex = searchingPlayers.findIndex(p => p.uuid === myUuidRef.current);
+
+        // If I am at an EVEN index (0, 2, 4...), I am designated as the Host for my pair.
+        // My opponent is exactly the person at myIndex + 1.
+        if (myIndex % 2 === 0 && myIndex + 1 < searchingPlayers.length) {
+          const opponent = searchingPlayers[myIndex + 1];
+          const newRoomId = `room_${myUuidRef.current}_${opponent.uuid}`;
           
-          if (isHost) {
-            const newRoomId = `room_${myUuidRef.current}_${opponent.uuid}`;
-            // Tell the opponent to join this room
-            lobby.send({ type: 'broadcast', event: 'match_found', payload: { targetUuid: opponent.uuid, roomId: newRoomId, hostName: nameInput } });
-            connectToGameRoom(newRoomId, 1, nameInput, opponent.name);
-          }
+          // Tell the exact opponent to join my room
+          lobby.send({ type: 'broadcast', event: 'match_found', payload: { targetUuid: opponent.uuid, roomId: newRoomId, hostName: nameInput } });
+          connectToGameRoom(newRoomId, 1, nameInput, opponent.name);
         }
       })
       .on('broadcast', { event: 'match_found' }, ({ payload }) => {
@@ -250,6 +255,7 @@ export default function OnlineDuelPage() {
     if (isCorrect) {
       if (currentState.status !== 'playing') return; // Prevent double-trigger overlaps
       setStatus('animating');
+      setLastWinnerName(player === 1 ? currentState.p1Name : currentState.p2Name);
     }
     
     const setP = player === 1 ? setP1 : setP2;
@@ -259,7 +265,7 @@ export default function OnlineDuelPage() {
       const damage = 15 + timer + (combo * 5);
       if (player === 1) playAudio(p1CorrectSfx); else playAudio(p2CorrectSfx);
 
-      setP(prev => ({ ...prev, anim: 'throwing', combo: prev.combo + 1, feedback: 'Correct!' }));
+      setP(prev => ({ ...prev, anim: 'throwing', combo: prev.combo + 1, input: '', feedback: 'Correct!' }));
       
       setTimeout(() => {
         setProjectile(player === 1 ? 'p1-to-p2' : 'p2-to-p1');
@@ -401,8 +407,19 @@ export default function OnlineDuelPage() {
           {status === 'countdown' && <div className="text-7xl font-black text-rose-500 animate-pulse drop-shadow-[0_0_20px_rgba(244,63,94,0.8)]">{countdown > 0 ? countdown : 'GO!'}</div>}
           {(status === 'playing' || status === 'animating') && (
             <>
-              <div className="text-3xl font-bold text-emerald-400 drop-shadow-[0_0_10px_rgba(52,211,153,0.5)]">{roundTimer}s</div>
-              <div className="text-6xl font-black bg-white/10 px-12 py-6 rounded-3xl backdrop-blur-md border border-white/20 shadow-2xl tracking-widest">{question}</div>
+              <div className="text-3xl font-bold text-emerald-400 drop-shadow-[0_0_10px_rgba(52,211,153,0.5)]">{status === 'animating' ? '---' : roundTimer + 's'}</div>
+              <div className="text-4xl md:text-6xl font-black bg-white/10 px-6 py-4 md:px-12 md:py-6 rounded-3xl backdrop-blur-md border border-white/20 shadow-2xl tracking-widest text-center min-w-[300px]">
+                {status === 'animating' && lastWinnerName ? (
+                  <div className="flex flex-col items-center tracking-normal">
+                    <span className="text-2xl md:text-3xl text-emerald-400 font-bold mb-2 drop-shadow-[0_0_10px_rgba(52,211,153,0.8)] uppercase">
+                      {lastWinnerName} Hit!
+                    </span>
+                    <span className="text-lg md:text-xl text-slate-300 font-medium">Answer was {answer}</span>
+                  </div>
+                ) : (
+                  question
+                )}
+              </div>
             </>
           )}
           {status === 'result' && (
