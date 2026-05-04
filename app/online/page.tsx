@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-import { io, Socket } from 'socket.io-client';
 import { useRouter } from 'next/navigation';
+import { supabase } from '../../lib/supabase';
+import { RealtimeChannel } from '@supabase/supabase-js';
 
 // Asset Imports
 import fightEast from '../assets/spearman/fight-stance-east.gif';
@@ -22,25 +23,22 @@ const p2CorrectSfx = '/api/audio/vine-boom.mp3';
 const p1WinSfx = '/api/audio/215-winner.mp3';
 const p2WinSfx = '/api/audio/award-winners-fanfare_SXgBSYC.mp3';
 
-type PlayerState = {
-  hp: number;
-  combo: number;
-  input: string;
-  anim: 'idle' | 'throwing' | 'hit' | 'death';
-  feedback: string | null;
-};
+type PlayerState = { hp: number; combo: number; input: string; anim: 'idle' | 'throwing' | 'hit' | 'death'; feedback: string | null; };
 
 export default function OnlineDuelPage() {
   const router = useRouter();
   
   // Multiplayer State
-  const [socket, setSocket] = useState<Socket | null>(null);
   const [netState, setNetState] = useState<'name_input' | 'searching' | 'connected'>('name_input');
   const [nameInput, setNameInput] = useState('');
   const [room, setRoom] = useState('');
   const [localPlayerId, setLocalPlayerId] = useState<1 | 2>(1);
   const [p1Name, setP1Name] = useState('');
   const [p2Name, setP2Name] = useState('');
+  
+  const lobbyChannelRef = useRef<RealtimeChannel | null>(null);
+  const gameChannelRef = useRef<RealtimeChannel | null>(null);
+  const myUuidRef = useRef(`user_${Math.random().toString(36).substring(7)}`);
 
   // Game State
   const [status, setStatus] = useState<'waiting' | 'countdown' | 'playing' | 'animating' | 'result'>('waiting');
@@ -55,56 +53,101 @@ export default function OnlineDuelPage() {
 
   const roundTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const joinMatchmaking = () => {
-    if (!nameInput.trim()) return;
-    
-    const socketInstance = io(); 
-    socketInstance.on('connect', () => {
-      setSocket(socketInstance);
-      setNetState('searching');
-      socketInstance.emit('join_matchmaking', { name: nameInput });
-    });
-
-    socketInstance.on('match_found', (data: any) => {
-      setRoom(data.room);
-      setNetState('connected');
-      
-      const isPlayer1 = data.players.p1.id === socketInstance.id;
-      setLocalPlayerId(isPlayer1 ? 1 : 2);
-      setP1Name(data.players.p1.name);
-      setP2Name(data.players.p2.name);
-      
-      setStatus('countdown');
-      setCountdown(3);
-    });
-
-    socketInstance.on('opponent_disconnected', () => {
-      alert("Opponent disconnected!");
-      window.location.reload();
-    });
-
-    socketInstance.on('new_question', (data: any) => {
-      setQuestion(data.question);
-      setAnswer(data.answer);
-      setRoundTimer(10);
-      setStatus('playing');
-      setP1(prev => ({ ...prev, input: '' }));
-      setP2(prev => ({ ...prev, input: '' }));
-    });
-
-    socketInstance.on('answer_submitted', (data: any) => {
-      triggerCombatAnimation(data.player, data.isCorrect, data.timer, data.combo);
-    });
-  };
-
   useEffect(() => {
     // Check if name came from URL params (from Landing page)
     const params = new URLSearchParams(window.location.search);
     const initialName = params.get('name');
-    if (initialName && initialName !== 'Player') {
-      setNameInput(initialName);
-    }
+    if (initialName && initialName !== 'Player') setNameInput(initialName);
+    
+    return () => {
+      if (lobbyChannelRef.current) supabase.removeChannel(lobbyChannelRef.current);
+      if (gameChannelRef.current) supabase.removeChannel(gameChannelRef.current);
+    };
   }, []);
+
+  const joinMatchmaking = async () => {
+    if (!nameInput.trim()) return;
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
+      alert("Missing Supabase configuration! Please add keys to .env");
+      return;
+    }
+    
+    setNetState('searching');
+
+    const lobby = supabase.channel('math-arena-lobby', { config: { presence: { key: myUuidRef.current } } });
+    lobbyChannelRef.current = lobby;
+
+    lobby
+      .on('presence', { event: 'sync' }, () => {
+        const state = lobby.presenceState();
+        const players = Object.values(state).flat() as any[];
+        
+        // Find another player looking for match
+        const opponent = players.find(p => p.status === 'searching' && p.uuid !== myUuidRef.current);
+        
+        if (opponent) {
+          // We found an opponent! 
+          // To avoid race conditions, the person who joined the lobby FIRST becomes the Host (Player 1)
+          const isHost = myUuidRef.current < opponent.uuid; 
+          
+          if (isHost) {
+            const newRoomId = `room_${myUuidRef.current}_${opponent.uuid}`;
+            // Tell the opponent to join this room
+            lobby.send({ type: 'broadcast', event: 'match_found', payload: { targetUuid: opponent.uuid, roomId: newRoomId, hostName: nameInput } });
+            connectToGameRoom(newRoomId, 1, nameInput, opponent.name);
+          }
+        }
+      })
+      .on('broadcast', { event: 'match_found' }, ({ payload }) => {
+        if (payload.targetUuid === myUuidRef.current) {
+          // I was invited by a host! I am Player 2.
+          connectToGameRoom(payload.roomId, 2, payload.hostName, nameInput);
+        }
+      })
+      .subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          await lobby.track({ uuid: myUuidRef.current, name: nameInput, status: 'searching' });
+        }
+      });
+  };
+
+  const connectToGameRoom = (roomId: string, myRole: 1 | 2, player1Name: string, player2Name: string) => {
+    // Leave lobby
+    if (lobbyChannelRef.current) supabase.removeChannel(lobbyChannelRef.current);
+    
+    setRoom(roomId);
+    setLocalPlayerId(myRole);
+    setP1Name(player1Name);
+    setP2Name(player2Name);
+    setNetState('connected');
+
+    const gameChannel = supabase.channel(roomId);
+    gameChannelRef.current = gameChannel;
+
+    gameChannel
+      .on('broadcast', { event: 'opponent_disconnected' }, () => {
+        alert("Opponent disconnected!");
+        window.location.reload();
+      })
+      .on('broadcast', { event: 'new_question' }, ({ payload }) => {
+        setQuestion(payload.question);
+        setAnswer(payload.answer);
+        setRoundTimer(10);
+        setStatus('playing');
+        setP1(prev => ({ ...prev, input: '' }));
+        setP2(prev => ({ ...prev, input: '' }));
+      })
+      .on('broadcast', { event: 'answer_submitted' }, ({ payload }) => {
+        triggerCombatAnimation(payload.player, payload.isCorrect, payload.timer, payload.combo);
+      })
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          // Start the game!
+          setStatus('countdown');
+          setCountdown(3);
+        }
+      });
+  };
 
   const playAudio = (src: string) => {
     if (typeof window !== 'undefined') {
@@ -129,7 +172,11 @@ export default function OnlineDuelPage() {
     setAnswer(ans);
     setRoundTimer(10);
     
-    socket?.emit('sync_question', { room, question: `${a} ${op} ${b}`, answer: ans });
+    gameChannelRef.current?.send({
+      type: 'broadcast',
+      event: 'new_question',
+      payload: { question: `${a} ${op} ${b}`, answer: ans }
+    });
   };
 
   // Countdown effect
@@ -154,12 +201,12 @@ export default function OnlineDuelPage() {
       } else {
         // Time is up. Only let host emit the timeout failure to prevent double emits.
         if (localPlayerId === 1) {
-          socket?.emit('submit_answer', { room, player: 1, isCorrect: false, timer: 0, combo: 0 });
+          gameChannelRef.current?.send({ type: 'broadcast', event: 'answer_submitted', payload: { player: 1, isCorrect: false, timer: 0, combo: 0 } });
           setTimeout(() => { generateQuestion(); }, 2000);
         }
       }
     }
-  }, [status, roundTimer, localPlayerId, socket, room]);
+  }, [status, roundTimer, localPlayerId, room]);
 
   const handleInput = (val: string) => {
     if (status !== 'playing') return;
@@ -178,7 +225,11 @@ export default function OnlineDuelPage() {
     if (!localState.input) return;
 
     const isCorrect = parseInt(localState.input) === answer;
-    socket?.emit('submit_answer', { room, player: localPlayerId, isCorrect, timer: roundTimer, combo: localState.combo });
+    gameChannelRef.current?.send({
+      type: 'broadcast',
+      event: 'answer_submitted',
+      payload: { player: localPlayerId, isCorrect, timer: roundTimer, combo: localState.combo }
+    });
   };
 
   const triggerCombatAnimation = (player: 1 | 2, isCorrect: boolean, timer: number, combo: number) => {
