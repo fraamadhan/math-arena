@@ -52,6 +52,12 @@ export default function OnlineDuelPage() {
   const [projectile, setProjectile] = useState<'none' | 'p1-to-p2' | 'p2-to-p1'>('none');
 
   const roundTimerRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Ref to prevent stale closures in Supabase listeners
+  const stateRef = useRef({ status, localPlayerId });
+  useEffect(() => {
+    stateRef.current = { status, localPlayerId };
+  }, [status, localPlayerId]);
 
   useEffect(() => {
     // Check if name came from URL params (from Landing page)
@@ -137,7 +143,7 @@ export default function OnlineDuelPage() {
         setP1(prev => ({ ...prev, input: '' }));
         setP2(prev => ({ ...prev, input: '' }));
       })
-      .on('broadcast', { event: 'answer_submitted' }, ({ payload }) => {
+      .on('broadcast', { event: 'player_action' }, ({ payload }) => {
         triggerCombatAnimation(payload.player, payload.isCorrect, payload.timer, payload.combo);
       })
       .subscribe((status) => {
@@ -199,10 +205,9 @@ export default function OnlineDuelPage() {
         roundTimerRef.current = setTimeout(() => setRoundTimer(roundTimer - 1), 1000);
         return () => { if (roundTimerRef.current) clearTimeout(roundTimerRef.current); };
       } else {
-        // Time is up. Only let host emit the timeout failure to prevent double emits.
+        // Time is up. Reset question without penalizing or locking.
         if (localPlayerId === 1) {
-          gameChannelRef.current?.send({ type: 'broadcast', event: 'answer_submitted', payload: { player: 1, isCorrect: false, timer: 0, combo: 0 } });
-          setTimeout(() => { generateQuestion(); }, 2000);
+          generateQuestion();
         }
       }
     }
@@ -225,17 +230,28 @@ export default function OnlineDuelPage() {
     if (!localState.input) return;
 
     const isCorrect = parseInt(localState.input) === answer;
+    
+    // 1. Instantly trigger animation locally for zero delay!
+    triggerCombatAnimation(localPlayerId, isCorrect, roundTimer, localState.combo);
+
+    // 2. Broadcast to opponent behind the scenes
     gameChannelRef.current?.send({
       type: 'broadcast',
-      event: 'answer_submitted',
+      event: 'player_action',
       payload: { player: localPlayerId, isCorrect, timer: roundTimer, combo: localState.combo }
     });
   };
 
   const triggerCombatAnimation = (player: 1 | 2, isCorrect: boolean, timer: number, combo: number) => {
-    setStatus('animating');
-    const pState = player === 1 ? p1 : p2;
-    const oppState = player === 1 ? p2 : p1;
+    const currentState = stateRef.current;
+    
+    // If it's a correct answer, lock the game for the transition.
+    // If it's wrong, DO NOT lock the game! Let the other player keep trying!
+    if (isCorrect) {
+      if (currentState.status !== 'playing') return; // Prevent double-trigger overlaps
+      setStatus('animating');
+    }
+    
     const setP = player === 1 ? setP1 : setP2;
     const setOpp = player === 1 ? setP2 : setP1;
     
@@ -251,27 +267,36 @@ export default function OnlineDuelPage() {
         
         setTimeout(() => {
           setProjectile('none');
-          const newHp = Math.max(0, oppState.hp - damage);
-          setOpp(prev => ({ ...prev, hp: newHp, anim: newHp === 0 ? 'death' : 'hit', feedback: `-${damage} HP` }));
+          
+          let resultHp = 0;
+          setOpp(prev => {
+            resultHp = Math.max(0, prev.hp - damage);
+            return { ...prev, hp: resultHp, anim: resultHp === 0 ? 'death' : 'hit', feedback: `-${damage} HP` };
+          });
 
           setTimeout(() => {
-            if (newHp === 0) {
+            if (resultHp === 0) {
               if (player === 1) playAudio(p1WinSfx); else playAudio(p2WinSfx);
               setStatus('result');
             } else {
               setOpp(prev => ({ ...prev, anim: 'idle' }));
               setStatus('playing');
-              if (localPlayerId === 1) generateQuestion();
+              if (currentState.localPlayerId === 1) generateQuestion();
             }
           }, 1500);
         }, 500);
       }, 600);
     } else {
-      setP(prev => ({ ...prev, hp: Math.max(0, prev.hp - 5), combo: 0, input: '', anim: 'hit', feedback: 'Wrong!' }));
+      // For WRONG answers: We don't set status to 'animating', so the opponent can still type!
+      let resultHp = 0;
+      setP(prev => {
+        resultHp = Math.max(0, prev.hp - 5);
+        return { ...prev, hp: resultHp, combo: 0, input: '', anim: 'hit', feedback: 'Wrong!' };
+      });
+      
       setTimeout(() => {
-        setP(prev => ({ ...prev, anim: prev.hp - 5 <= 0 ? 'death' : 'idle' }));
-        if (pState.hp - 5 <= 0) setStatus('result');
-        else setStatus('playing');
+        setP(prev => ({ ...prev, anim: resultHp === 0 ? 'death' : 'idle' }));
+        if (resultHp === 0) setStatus('result');
       }, 1000);
     }
   };
