@@ -33,12 +33,14 @@ type GameStatus = 'waiting' | 'countdown' | 'playing' | 'animating' | 'result';
 export default function DuelPage() {
   const [p1Name, setP1Name] = useState('Player A');
   const [p2Name, setP2Name] = useState('Player B');
+  const [diff, setDiff] = useState<'easy'|'medium'|'hard'>('medium');
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       if (params.get('p1')) setP1Name(params.get('p1')!);
       if (params.get('p2')) setP2Name(params.get('p2')!);
+      if (params.get('diff')) setDiff(params.get('diff') as any);
     }
   }, []);
 
@@ -51,32 +53,48 @@ export default function DuelPage() {
   const [question, setQuestion] = useState('');
   const [answer, setAnswer] = useState(0);
 
-  const [p1, setP1] = useState<PlayerState>({ hp: 100, combo: 0, input: '', anim: 'idle', feedback: null });
-  const [p2, setP2] = useState<PlayerState>({ hp: 100, combo: 0, input: '', anim: 'idle', feedback: null });
+  const [p1, setP1] = useState<PlayerState>({ hp: 500, combo: 0, input: '', anim: 'idle', feedback: null });
+  const [p2, setP2] = useState<PlayerState>({ hp: 500, combo: 0, input: '', anim: 'idle', feedback: null });
   
   const [projectile, setProjectile] = useState<'none' | 'p1-to-p2' | 'p2-to-p1'>('none');
+  const [lastWinnerName, setLastWinnerName] = useState<string | null>(null);
 
   const roundTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const startGame = () => {
-    setP1({ hp: 100, combo: 0, input: '', anim: 'idle', feedback: null });
-    setP2({ hp: 100, combo: 0, input: '', anim: 'idle', feedback: null });
+    setP1({ hp: 500, combo: 0, input: '', anim: 'idle', feedback: null });
+    setP2({ hp: 500, combo: 0, input: '', anim: 'idle', feedback: null });
     setProjectile('none');
     setStatus('countdown');
     setCountdown(3);
   };
 
   const generateQuestion = () => {
-    const ops = ['+', '-', '*'];
-    const op = ops[Math.floor(Math.random() * ops.length)];
-    let a = Math.floor(Math.random() * 12) + 1;
-    let b = Math.floor(Math.random() * 12) + 1;
+    let a, b, op, ans = 0;
     
+    if (diff === 'easy') {
+       const ops = ['+', '-'];
+       op = ops[Math.floor(Math.random() * ops.length)];
+       a = Math.floor(Math.random() * 12) + 1;
+       b = Math.floor(Math.random() * 12) + 1;
+    } else if (diff === 'hard') {
+       const ops = ['+', '-', '*'];
+       op = ops[Math.floor(Math.random() * ops.length)];
+       a = Math.floor(Math.random() * 20) + 5;
+       b = Math.floor(Math.random() * 20) + 5;
+       if (op === '*') { a = Math.floor(Math.random() * 12) + 2; b = Math.floor(Math.random() * 12) + 2; }
+    } else {
+       const ops = ['+', '-', '*'];
+       op = ops[Math.floor(Math.random() * ops.length)];
+       a = Math.floor(Math.random() * 15) + 2;
+       b = Math.floor(Math.random() * 15) + 2;
+       if (op === '*') { a = Math.floor(Math.random() * 9) + 2; b = Math.floor(Math.random() * 9) + 2; }
+    }
+
     if (op === '-' && a < b) {
       const temp = a; a = b; b = temp;
     }
 
-    let ans = 0;
     if (op === '+') ans = a + b;
     if (op === '-') ans = a - b;
     if (op === '*') ans = a * b;
@@ -84,6 +102,9 @@ export default function DuelPage() {
     setQuestion(`${a} ${op} ${b}`);
     setAnswer(ans);
     setRoundTimer(10);
+    setStatus('playing');
+    setP1(prev => ({ ...prev, input: '' }));
+    setP2(prev => ({ ...prev, input: '' }));
   };
 
   useEffect(() => {
@@ -92,7 +113,6 @@ export default function DuelPage() {
         const t = setTimeout(() => setCountdown(countdown - 1), 1000);
         return () => clearTimeout(t);
       } else {
-        setStatus('playing');
         generateQuestion();
       }
     }
@@ -155,12 +175,22 @@ export default function DuelPage() {
 
     if (parseInt(pState.input) === answer) {
       setStatus('animating');
-      const damage = 15 + roundTimer + (pState.combo * 5);
+      setLastWinnerName(player === 1 ? p1Name : p2Name);
+      
+      const damage = 40 + (roundTimer * 2) + (pState.combo * 15);
+      const regen = 20 + (pState.combo * 5);
 
       if (player === 1) playAudio(p1CorrectSfx);
       else playAudio(p2CorrectSfx);
 
-      setP(prev => ({ ...prev, anim: 'throwing', combo: prev.combo + 1, feedback: 'Correct!' }));
+      setP(prev => ({ 
+        ...prev, 
+        hp: Math.min(500, prev.hp + regen), 
+        anim: 'throwing', 
+        combo: prev.combo + 1, 
+        input: '', 
+        feedback: `Correct! +${regen} HP` 
+      }));
       
       setTimeout(() => {
         setProjectile(player === 1 ? 'p1-to-p2' : 'p2-to-p1');
@@ -183,10 +213,7 @@ export default function DuelPage() {
               setStatus('result');
             } else {
               setOpp(prev => ({ ...prev, anim: 'idle' }));
-              setStatus('playing');
               generateQuestion();
-              setP1(prev => ({ ...prev, input: '' }));
-              setP2(prev => ({ ...prev, input: '' }));
             }
           }, 1500);
         }, 500);
@@ -194,16 +221,16 @@ export default function DuelPage() {
     } else {
       setP(prev => ({ 
         ...prev, 
-        hp: Math.max(0, prev.hp - 5), 
+        hp: Math.max(0, prev.hp - 20), 
         combo: 0, 
         input: '',
         anim: 'hit',
-        feedback: 'Wrong!'
+        feedback: 'Wrong! -20 HP'
       }));
       
       setTimeout(() => {
-        setP(prev => ({ ...prev, anim: prev.hp - 5 <= 0 ? 'death' : 'idle' }));
-        if (pState.hp - 5 <= 0) setStatus('result');
+        setP(prev => ({ ...prev, anim: prev.hp - 20 <= 0 ? 'death' : 'idle' }));
+        if (pState.hp - 20 <= 0) setStatus('result');
       }, 1000);
     }
   };
@@ -267,7 +294,7 @@ export default function DuelPage() {
     }
   };
 
-  const getHpColor = (hp: number) => hp > 50 ? 'bg-emerald-500' : hp > 20 ? 'bg-yellow-400' : 'bg-rose-500';
+  const getHpColor = (hp: number) => hp > 250 ? 'bg-emerald-500' : hp > 100 ? 'bg-yellow-400' : 'bg-rose-500';
 
   const renderCalcButton = (player: 1 | 2, num: string, hint: string, onClick: () => void, isClear = false, isDel = false, classNameOverride = '') => {
     let baseClass = "relative flex flex-col items-center justify-center bg-white/10 hover:bg-white/20 active:scale-95 border border-white/5 rounded-xl transition-all shadow-md h-14";
@@ -293,12 +320,12 @@ export default function DuelPage() {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-slate-900 to-black text-white font-sans overflow-hidden">
+    <div className="flex flex-col h-screen bg-slate-900 bg-gradient-to-b from-slate-800 to-black text-white font-sans overflow-hidden">
       {/* HUD */}
       <div className="flex justify-between items-start p-8 h-[15vh] z-10 shrink-0">
         <div className="w-[300px]">
           <div className="w-full h-6 bg-white/10 rounded-full border-2 border-white/20 shadow-[0_0_20px_rgba(0,0,0,0.5)] overflow-hidden">
-            <div className={`h-full transition-all duration-300 ease-out ${getHpColor(p1.hp)}`} style={{ width: `${p1.hp}%` }}></div>
+            <div className={`h-full transition-all duration-300 ease-out ${getHpColor(p1.hp)}`} style={{ width: `${(p1.hp / 500) * 100}%` }}></div>
           </div>
           <div className="mt-2 text-sm font-bold text-slate-400 uppercase tracking-widest">{p1Name} - HP: {p1.hp} | Combo: {p1.combo}</div>
         </div>
@@ -312,8 +339,19 @@ export default function DuelPage() {
           {status === 'countdown' && <div className="text-7xl font-black text-rose-500 animate-pulse drop-shadow-[0_0_20px_rgba(244,63,94,0.8)]">{countdown > 0 ? countdown : 'GO!'}</div>}
           {(status === 'playing' || status === 'animating') && (
             <>
-              <div className="text-3xl font-bold text-emerald-400 drop-shadow-[0_0_10px_rgba(52,211,153,0.5)]">{roundTimer}s</div>
-              <div className="text-6xl font-black bg-white/10 px-12 py-6 rounded-3xl backdrop-blur-md border border-white/20 shadow-2xl tracking-widest">{question}</div>
+              <div className="text-3xl font-bold text-emerald-400 drop-shadow-[0_0_10px_rgba(52,211,153,0.5)]">{status === 'animating' ? '---' : roundTimer + 's'}</div>
+              <div className="text-4xl md:text-6xl font-black bg-white/10 px-6 py-4 md:px-12 md:py-6 rounded-3xl backdrop-blur-md border border-white/20 shadow-2xl tracking-widest text-center min-w-[300px]">
+                {status === 'animating' && lastWinnerName ? (
+                  <div className="flex flex-col items-center tracking-normal">
+                    <span className="text-2xl md:text-3xl text-emerald-400 font-bold mb-2 drop-shadow-[0_0_10px_rgba(52,211,153,0.8)] uppercase">
+                      {lastWinnerName} Hit!
+                    </span>
+                    <span className="text-lg md:text-xl text-slate-300 font-medium">Answer was {answer}</span>
+                  </div>
+                ) : (
+                  question
+                )}
+              </div>
             </>
           )}
           {status === 'result' && (
@@ -328,7 +366,7 @@ export default function DuelPage() {
 
         <div className="w-[300px] text-right">
           <div className="w-full h-6 bg-white/10 rounded-full border-2 border-white/20 shadow-[0_0_20px_rgba(0,0,0,0.5)] overflow-hidden scale-x-[-1]">
-            <div className={`h-full transition-all duration-300 ease-out ${getHpColor(p2.hp)}`} style={{ width: `${p2.hp}%` }}></div>
+            <div className={`h-full transition-all duration-300 ease-out ${getHpColor(p2.hp)}`} style={{ width: `${(p2.hp / 500) * 100}%` }}></div>
           </div>
           <div className="mt-2 text-sm font-bold text-slate-400 uppercase tracking-widest">{p2Name} - HP: {p2.hp} | Combo: {p2.combo}</div>
         </div>

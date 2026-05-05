@@ -11,11 +11,13 @@ export default function Home() {
   const router = useRouter();
   const [p1Name, setP1Name] = useState('');
   const [p2Name, setP2Name] = useState('');
+  const [diff, setDiff] = useState<'easy'|'medium'|'hard'>('medium');
 
   const handleStart = () => {
     const params = new URLSearchParams();
     if (p1Name) params.set('p1', p1Name);
     if (p2Name) params.set('p2', p2Name);
+    params.set('diff', diff);
     router.push(`/duel?${params.toString()}`);
   };
 
@@ -60,11 +62,16 @@ export default function Home() {
                 maxLength={12}
               />
             </div>
+            <div className="flex gap-2 w-full max-w-md justify-center bg-black/30 p-1 rounded-xl border border-white/10 mb-2">
+              <button onClick={() => setDiff('easy')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-all ${diff === 'easy' ? 'bg-emerald-500 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}>Easy</button>
+              <button onClick={() => setDiff('medium')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-all ${diff === 'medium' ? 'bg-yellow-500 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}>Medium</button>
+              <button onClick={() => setDiff('hard')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-all ${diff === 'hard' ? 'bg-rose-500 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}>Hard</button>
+            </div>
             <div className="flex flex-col md:flex-row gap-4 w-full">
               <button onClick={handleStart} className="w-full bg-gradient-to-r from-emerald-500 to-teal-500 text-white px-8 py-5 text-lg font-extrabold rounded-full uppercase tracking-widest shadow-lg hover:-translate-y-1 hover:scale-105 transition-all duration-300">
                 Local 1v1
               </button>
-              <button onClick={() => router.push(`/online?name=${p1Name || 'Player'}`)} className="w-full bg-gradient-to-r from-rose-500 to-orange-500 text-white px-8 py-5 text-lg font-extrabold rounded-full uppercase tracking-widest shadow-lg hover:-translate-y-1 hover:scale-105 transition-all duration-300">
+              <button onClick={() => router.push(`/online?name=${p1Name || 'Player'}&diff=${diff}`)} className="w-full bg-gradient-to-r from-rose-500 to-orange-500 text-white px-8 py-5 text-lg font-extrabold rounded-full uppercase tracking-widest shadow-lg hover:-translate-y-1 hover:scale-105 transition-all duration-300">
                 Play Online
               </button>
             </div>
